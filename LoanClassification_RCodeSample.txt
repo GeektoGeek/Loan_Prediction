@@ -1,0 +1,108 @@
+ ### To clear the environment of R
+ rm(list=ls())
+ 
+ library(tidyquant)  # Loads tidyverse and custom ggplot themes
+ library(unbalanced) # Methods for dealing with unbalanced data sets
+
+ library(h2o)        # Professional grade ML
+ library(sqldf)
+ library(plyr)
+
+ setwd("C:/Users/Dan Sarkar/Desktop/Folder")
+ trainX <- read.csv("trainX.csv", sep=",")
+ trainY <- read.csv("trainY.csv", sep=",")
+ train<- sqldf("select a.*, b.FullyFunded from trainX a join trainY b on a.customer_id=b.customer_id")
+ train1<- train
+ train2<- subset(train1, select=c(3,4,5,7,9,12,13,14,15,16,17,18,19))
+ View(train2)
+ train2$residence_rent_or_own <- factor(ifelse(train2$residence_rent_or_own,"yes","no"))
+ View(train2)
+ train2$bank_account_direct_deposit <- factor(ifelse(train2$bank_account_direct_deposit,"yes","no"))
+ View(train2)
+ train2$FullyFunded <- factor(ifelse(train2$FullyFunded,"yes","no"))
+ View(train2)
+ library(plyr)
+ train2$bank_account_direct_deposit <- mapvalues(train2$bank_account_direct_deposit,from = c("yes","no"), to = c(1,0))
+ View(train2)
+ train2$FullyFunded <- mapvalues(train2$FullyFunded,from = c("yes","no"), to = c(1,0))
+ View(train2)
+ View(train2)
+ train2$home_phone_type <- mapvalues(train2$home_phone_type,from = c("Home","Mobile","Work"), to = c(0,1,2))
+ View(train2)
+
+ # Unbalanced data set
+ 
+train2$FullyFunded %>% table() %>% prop.table()
+
+   0    1 
+0.27 0.73 
+
+### Use GGPlot to do some exploration loan duration and payment based on the target
+
+
+scatter <- ggplot(data=train2, aes(x = loan_duration, y = num_payments)) 
+> scatter + geom_point(aes(color=FullyFunded, shape=FullyFunded)) +
+    xlab("loan_duration") +  ylab("num_payments") +
+    ggtitle("loan values")
+
+
+ ### Try to make the sample more balanced
+
+ # Train/Validation Set Split
+ split_pct <- 0.85
+ n <- nrow(train2)
+ sample_size <- floor(split_pct * n)
+ 
+ set.seed(159)
+ idx_train <- sample(1:n, size = sample_size)
+ 
+ valid_raw_df <- train2[-idx_train,]
+ train_raw_df <- train2[idx_train,]
+
+
+ # Use SMOTE sampling to balance the dataset
+ input  <- train_raw_df %>% select(-FullyFunded)
+ output <- train_raw_df$FullyFunded 
+ train_balanced <- ubSMOTE(input, output, perc.over = 150, perc.under = 200, k = 5)
+ train_raw_df <- bind_cols(as.tibble(train_balanced$X), tibble(FullyFunded = train_balanced$Y))
+ train_raw_df
+ train_raw_df$FullyFunded %>% table() %>% prop.table()
+.
+  0   1 
+0.5 0.5 
+
+ ### Let's try H2o AutoML package to see how is it performance on this problem
+
+ h2o.init(ip="localhost", port=54321, max_mem_size="1250m")
+
+ train_h2o <- as.h2o(train_raw_df)
+  |===================================================================================================================| 100%
+ valid_h2o <- as.h2o(valid_raw_df)
+  |===================================================================================================================| 100%
+ y <- "FullyFunded"
+ x <- setdiff(names(train_h2o), y)
+
+ automl_models_h2o <- h2o.automl(
++     x = x, 
++     y = y,
++     training_frame    = train_h2o,
++     validation_frame  = valid_h2o,
++     max_runtime_secs  = 45
++ )
+  |===================================================================================================================| 100%
+  |===================================================================================================================| 100%
+ pred_h2o <- h2o.predict( automl_models_h2o, newdata = valid_h2o)
+  |===================================================================================================================| 100%
+ View(valid_raw_df)
+ pred<- as.data.frame(pred_h2o)
+ View(pred)
+ valid_raw_df<- cbind(valid_raw_df,pred)
+ View(valid_raw_df)
+ Acc_AutoML<- 1- (mean(valid_raw_df$FullyFunded!= valid_raw_df$predict))
+ Acc_AutoML
+[1] 0.7833333
+
+
+
+
+
